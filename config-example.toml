@@ -1,5 +1,5 @@
 
-[file]
+[server]
 root = "./web/mnt"
 audioExt = [
   ".wav",
@@ -10,6 +10,7 @@ audioExt = [
   ".m4a",
   ".flac"
 ]
+urlPrefix = "/MusicServer"
 
 [database]
 host = ["127.0.0.1:27017"]
