@@ -23,7 +23,11 @@ func main() {
 	if _, err := toml.Decode(string(tomlData), &conf); err != nil {
 		panic("config parse error")
 	}
-	log.Println("line")
+
+	pconv := NewPathConv()
+	go pconv.StartWatching(conf.Server.Root, "/file/")
+
+	log.Println("start")
 	router := gin.Default()
 	config := cors.DefaultConfig()
 	config.AllowAllOrigins = true
