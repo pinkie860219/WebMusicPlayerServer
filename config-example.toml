@@ -11,6 +11,7 @@ audioExt = [
   ".flac"
 ]
 urlPrefix = "/MusicServer"
+port = "8026"
 
 [database]
 host = ["127.0.0.1:27017"]

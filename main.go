@@ -14,6 +14,7 @@ import (
 )
 
 var conf Config
+var pconv = NewPathConv()
 
 func main() {
 	tomlData, err := ioutil.ReadFile("./config.toml")
@@ -24,8 +25,8 @@ func main() {
 		panic("config parse error")
 	}
 
-	pconv := NewPathConv()
-	go pconv.StartWatching(conf.Server.Root, "/file/")
+
+//	go pconv.StartWatching(conf.Server.Root, "/file/")
 
 	log.Println("start")
 	router := gin.Default()
@@ -35,8 +36,9 @@ func main() {
 	router.Use(cors.New(config))
 
 	//serve for music fils.
-	router.Static(conf.Server.UrlPrefix+"/file/", conf.Server.Root)
-
+	//router.Static(conf.Server.UrlPrefix+"/file/", conf.Server.Root)
+	router.GET(conf.Server.UrlPrefix+"/file", serveFileHandler)
+	
 	//serve for files list.
 	router.GET(conf.Server.UrlPrefix+"/dir", directoryHandler)
 
@@ -48,8 +50,8 @@ func main() {
 	router.DELETE(conf.Server.UrlPrefix+"/songlist", deleteSongHandler)
 	/////
 
-	router.Run(":8026")
-	log.Println("Serveing on 8026")
+	router.Run(":"+conf.Server.Port)
+	log.Println("Serveing on "+conf.Server.Port)
 }
 
 func deleteSongHandler(c *gin.Context) {
@@ -92,6 +94,7 @@ func deleteSongHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, list)
 
 }
+
 func songQueryHandler(c *gin.Context) {
 	songurl := c.PostForm("url")
 	session, err := mgo.DialWithInfo(&mgo.DialInfo{
@@ -158,6 +161,7 @@ func showSongListHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, list)
 
 }
+
 func singleSongListHandler(c *gin.Context) {
 	session, err := mgo.DialWithInfo(&mgo.DialInfo{
 		Addrs: conf.DB.Host,
@@ -181,6 +185,7 @@ func singleSongListHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, songs)
 
 }
+
 func addToSongListHandler(c *gin.Context) {
 	session, err := mgo.DialWithInfo(&mgo.DialInfo{
 		Addrs: conf.DB.Host,
@@ -224,9 +229,14 @@ func addToSongListHandler(c *gin.Context) {
 }
 
 func directoryHandler(c *gin.Context) {
-	dir := c.Query("dir")
+	query_dir := c.Query("dir")
+	real_dir := pconv.Query(query_dir)
 	//read files in directory.
-	files, err := ioutil.ReadDir(conf.Server.Root + dir)
+
+	curDir := conf.Server.Root + real_dir
+
+	log.Println("curDir = " + curDir)
+	files, err := ioutil.ReadDir(curDir)
 	if err != nil {
 
 	}
@@ -251,11 +261,18 @@ func directoryHandler(c *gin.Context) {
 		names = append(names, Item{
 			Name:  f.Name(),
 			IsDir: f.IsDir(),
+			HashedCode: pconv.AddHash(real_dir+"/"+f.Name()),
 		})
 	}
 	c.JSON(http.StatusOK, names)
 }
 
+func serveFileHandler(c *gin.Context) {
+	query_file := c.Query("m")
+	real_file := pconv.Query(query_file)
+	c.File(conf.Server.Root+real_file)
+}
+	
 func isAudioExt(val string) bool {
 	for i := range conf.Server.AudioExt {
 		if conf.Server.AudioExt[i] == val {
@@ -275,6 +292,7 @@ type serverConfig struct {
 	Root      string   `toml:"root"`
 	AudioExt  []string `toml:"audioExt"`
 	UrlPrefix string   `toml:"urlPrefix"`
+	Port string        `toml:"port"`
 }
 
 type dbConfig struct {
@@ -284,7 +302,7 @@ type dbConfig struct {
 
 //datatype of file or folder
 type Item struct {
-	Action string //joystick
+	HashedCode string
 	Name   string
 	IsDir  bool
 }

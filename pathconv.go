@@ -26,9 +26,10 @@ func PathConvHash(s string) string {
 	return fmt.Sprintf("%x", sum)[:11]
 }
 
-func (pcv *PathConv) AddHash(s string) {
+func (pcv *PathConv) AddHash(s string) string{
 	hashed := PathConvHash(s)
 	pcv.table[hashed] = s
+	return hashed
 }
 
 /**
