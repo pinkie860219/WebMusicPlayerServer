@@ -4,18 +4,29 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"github.com/fsnotify/fsnotify"
-	"io/ioutil"
+//	"io/ioutil"
 )
 
+type DirInfo struct {
+	DirArray []string
+	DirStr string
+}
+func NewDirInfo(dArray []string, dStr string) *DirInfo{
+	di := new(DirInfo)
+	di.DirArray = dArray
+	di.DirStr = dStr
+	return di
+} 
+
 type PathConv struct {
-	table           map[string]string /* hashed (12bit) -> original path*/
+	table           map[string] *DirInfo /* hashed (12bit) -> original path*/
 	isBuildingTable bool
 	watcher         *fsnotify.Watcher
 }
 
 func NewPathConv() *PathConv {
 	pcv := new(PathConv)
-	pcv.table = make(map[string]string)
+	pcv.table = make(map[string] *DirInfo)
 	pcv.isBuildingTable = false
 	pcv.watcher = nil
 	return pcv
@@ -26,9 +37,21 @@ func PathConvHash(s string) string {
 	return fmt.Sprintf("%x", sum)[:11]
 }
 
-func (pcv *PathConv) AddHash(s string) string{
-	hashed := PathConvHash(s)
-	pcv.table[hashed] = s
+func (pcv *PathConv) AddHash(pre_hashed string, file_name string) string{
+	preDirInfo := pcv.Query(pre_hashed)
+	prefix := ""
+	if(preDirInfo != nil){
+		prefix = preDirInfo.DirStr
+	}
+	hashed := PathConvHash(prefix+"/"+file_name)
+
+	var newArray []string
+	if(preDirInfo != nil){
+		newArray = append(newArray, preDirInfo.DirArray...)
+	}
+	newArray = append(newArray, file_name)
+	dirInfo := NewDirInfo(newArray, prefix+"/"+file_name)
+	pcv.table[hashed] = dirInfo
 	return hashed
 }
 
@@ -41,40 +64,40 @@ func (pcv *PathConv) AddHash(s string) string{
  * => "./files/cat"       (path for url)
  */
 
-func (pcv *PathConv) buildFromImpl(walkPath string, recordPath string, prefix string) {
-	files, err := ioutil.ReadDir(walkPath + prefix)
-	if err != nil {
-		panic(err)
-	}
+//func (pcv *PathConv) buildFromImpl(walkPath string, recordPath string, prefix string) {
+//	files, err := ioutil.ReadDir(walkPath + prefix)
+//	if err != nil {
+//		panic(err)
+//	}
+//
+//	for _, f := range files {
+//		if f.IsDir() {
+//			pcv.buildFromImpl(walkPath, recordPath, prefix+f.Name()+"/")
+//			pcv.AddHash(recordPath + prefix + f.Name() + "/")
+//			pcv.watcher.Add(walkPath + prefix + f.Name())
+//		} else {
+//			pcv.AddHash(recordPath + prefix + f.Name())
+//		}
+//	}
+//}
+//
+//func (pcv *PathConv) BuildFrom(dir string, recordPath string) {
+//	if pcv.isBuildingTable {
+//		fmt.Println("Building in process. Skip.")
+//		return
+//	}
+//
+//	fmt.Println("Pathconv building...")
+//	if dir[len(dir)-1] != []byte("/")[0] {
+//		dir += "/"
+//	}
+//	pcv.isBuildingTable = true
+//	defer func() { pcv.isBuildingTable = false }()
+//	pcv.buildFromImpl(dir, recordPath, "")
+//	fmt.Println("Pathconv built")
+//}
 
-	for _, f := range files {
-		if f.IsDir() {
-			pcv.buildFromImpl(walkPath, recordPath, prefix+f.Name()+"/")
-			pcv.AddHash(recordPath + prefix + f.Name() + "/")
-			pcv.watcher.Add(walkPath + prefix + f.Name())
-		} else {
-			pcv.AddHash(recordPath + prefix + f.Name())
-		}
-	}
-}
-
-func (pcv *PathConv) BuildFrom(dir string, recordPath string) {
-	if pcv.isBuildingTable {
-		fmt.Println("Building in process. Skip.")
-		return
-	}
-
-	fmt.Println("Pathconv building...")
-	if dir[len(dir)-1] != []byte("/")[0] {
-		dir += "/"
-	}
-	pcv.isBuildingTable = true
-	defer func() { pcv.isBuildingTable = false }()
-	pcv.buildFromImpl(dir, recordPath, "")
-	fmt.Println("Pathconv built")
-}
-
-func (pcv *PathConv) Query(hashed string) string {
+func (pcv *PathConv) Query(hashed string) *DirInfo {
 	return pcv.table[hashed]
 }
 
@@ -84,32 +107,32 @@ func (pcv *PathConv) Show() {
 	}
 }
 
-func (pcv *PathConv) StartWatching(dir string, recordPath string) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		panic(err)
-	}
-	defer watcher.Close()
-	pcv.watcher = watcher
-	// build for first time
-	pcv.BuildFrom(dir, recordPath)
-
-	done := make(chan bool)
-	go func() {
-		for {
-			select {
-			case event := <-watcher.Events:
-				fmt.Println("event:", event)
-				// clear pcv.table
-				pcv.table = make(map[string]string)
-				pcv.BuildFrom(dir, recordPath)
-			}
-		}
-	}()
-
-	err = watcher.Add(dir)
-	if err != nil {
-		panic(err)
-	}
-	<-done
-}
+//func (pcv *PathConv) StartWatching(dir string, recordPath string) {
+//	watcher, err := fsnotify.NewWatcher()
+//	if err != nil {
+//		panic(err)
+//	}
+//	defer watcher.Close()
+//	pcv.watcher = watcher
+//	// build for first time
+//	pcv.BuildFrom(dir, recordPath)
+//
+//	done := make(chan bool)
+//	go func() {
+//		for {
+//			select {
+//			case event := <-watcher.Events:
+//				fmt.Println("event:", event)
+//				// clear pcv.table
+//				pcv.table = make(map[string]string)
+//				pcv.BuildFrom(dir, recordPath)
+//			}
+//		}
+//	}()
+//
+//	err = watcher.Add(dir)
+//	if err != nil {
+//		panic(err)
+//	}
+//	<-done
+//}

@@ -230,13 +230,17 @@ func addToSongListHandler(c *gin.Context) {
 
 func directoryHandler(c *gin.Context) {
 	query_dir := c.Query("dir")
-	real_dir := pconv.Query(query_dir)
+	dirInfo := pconv.Query(query_dir)
 	//read files in directory.
-
-	curDir := conf.Server.Root + real_dir
-
-	log.Println("curDir = " + curDir)
-	files, err := ioutil.ReadDir(curDir)
+	
+	targetDir := conf.Server.Root
+	curDir := ""
+	if(dirInfo != nil){
+		curDir = dirInfo.DirStr
+	}
+	targetDir += curDir
+	log.Println("targetDir = " + targetDir)
+	files, err := ioutil.ReadDir(targetDir)
 	if err != nil {
 
 	}
@@ -261,15 +265,21 @@ func directoryHandler(c *gin.Context) {
 		names = append(names, Item{
 			Name:  f.Name(),
 			IsDir: f.IsDir(),
-			HashedCode: pconv.AddHash(real_dir+"/"+f.Name()),
+			HashedCode: pconv.AddHash(query_dir, f.Name()),
 		})
 	}
-	c.JSON(http.StatusOK, names)
+	
+	dirRes := new(DirResponse)
+	if(dirInfo != nil){
+		dirRes.DirArray = dirInfo.DirArray
+	}
+	dirRes.DirFiles = names
+	c.JSON(http.StatusOK, dirRes)
 }
 
 func serveFileHandler(c *gin.Context) {
 	query_file := c.Query("m")
-	real_file := pconv.Query(query_file)
+	real_file := pconv.Query(query_file).DirStr
 	c.File(conf.Server.Root+real_file)
 }
 	
@@ -306,7 +316,10 @@ type Item struct {
 	Name   string
 	IsDir  bool
 }
-
+type DirResponse struct {
+	DirArray []string
+	DirFiles []Item
+}
 //datatype of song in db.
 type Song struct {
 	Name string
