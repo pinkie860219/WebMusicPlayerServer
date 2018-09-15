@@ -6,12 +6,16 @@ import (
 	"github.com/fsnotify/fsnotify"
 //	"io/ioutil"
 )
+type DirItem struct {
+	Name string
+	HashedCode string
+}
 
 type DirInfo struct {
-	DirArray []string
+	DirArray []*DirItem
 	DirStr string
 }
-func NewDirInfo(dArray []string, dStr string) *DirInfo{
+func NewDirInfo(dArray []*DirItem, dStr string) *DirInfo{
 	di := new(DirInfo)
 	di.DirArray = dArray
 	di.DirStr = dStr
@@ -45,11 +49,15 @@ func (pcv *PathConv) AddHash(pre_hashed string, file_name string) string{
 	}
 	hashed := PathConvHash(prefix+"/"+file_name)
 
-	var newArray []string
+	dirItem := new(DirItem)
+	dirItem.Name = file_name
+	dirItem.HashedCode = hashed
+	
+	var newArray []*DirItem
 	if(preDirInfo != nil){
 		newArray = append(newArray, preDirInfo.DirArray...)
 	}
-	newArray = append(newArray, file_name)
+	newArray = append(newArray, dirItem)
 	dirInfo := NewDirInfo(newArray, prefix+"/"+file_name)
 	pcv.table[hashed] = dirInfo
 	return hashed

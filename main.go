@@ -317,7 +317,7 @@ type Item struct {
 	IsDir  bool
 }
 type DirResponse struct {
-	DirArray []string
+	DirArray []*DirItem
 	DirFiles []Item
 }
 //datatype of song in db.
