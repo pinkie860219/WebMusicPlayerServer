@@ -279,8 +279,12 @@ func directoryHandler(c *gin.Context) {
 
 func serveFileHandler(c *gin.Context) {
 	query_file := c.Query("m")
-	real_file := pconv.Query(query_file).DirStr
-	c.File(conf.Server.Root+real_file)
+	real_file := pconv.Query(query_file)
+	file_name := ""
+	if(real_file != nil){
+		file_name = real_file.DirStr
+	}
+	c.File(conf.Server.Root+file_name)
 }
 	
 func isAudioExt(val string) bool {
