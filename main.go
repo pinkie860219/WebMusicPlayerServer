@@ -27,7 +27,9 @@ func main() {
 
 
 //	go pconv.StartWatching(conf.Server.Root, "/file/")
-
+	//build the map
+	pconv.BuildMap("", "")
+	
 	log.Println("start")
 	router := gin.Default()
 	config := cors.DefaultConfig()
@@ -230,9 +232,8 @@ func addToSongListHandler(c *gin.Context) {
 
 func directoryHandler(c *gin.Context) {
 	query_dir := c.Query("dir")
-	dirInfo := pconv.Query(query_dir)
-	//read files in directory.
-	
+	dirInfo := pconv.Query(query_dir)//type: DirInfo
+
 	targetDir := conf.Server.Root
 	curDir := ""
 	if(dirInfo != nil){
@@ -242,7 +243,7 @@ func directoryHandler(c *gin.Context) {
 	log.Println("targetDir = " + targetDir)
 	files, err := ioutil.ReadDir(targetDir)
 	if err != nil {
-
+		panic(err)
 	}
 	s_dir := make([]os.FileInfo, 0)  //list of folders
 	s_file := make([]os.FileInfo, 0) //list of files

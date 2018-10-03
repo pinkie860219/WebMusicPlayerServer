@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"github.com/fsnotify/fsnotify"
-//	"io/ioutil"
+	"io/ioutil"
 )
 type DirItem struct {
 	Name string
@@ -48,7 +48,11 @@ func (pcv *PathConv) AddHash(pre_hashed string, file_name string) string{
 		prefix = preDirInfo.DirStr
 	}
 	hashed := PathConvHash(prefix+"/"+file_name)
-
+	//check if hashed is exist
+	if pcv.table[hashed] != nil{
+		return hashed
+	}
+	
 	dirItem := new(DirItem)
 	dirItem.Name = file_name
 	dirItem.HashedCode = hashed
@@ -63,6 +67,38 @@ func (pcv *PathConv) AddHash(pre_hashed string, file_name string) string{
 	return hashed
 }
 
+func (pcv *PathConv) Query(hashed string) *DirInfo {
+	return pcv.table[hashed]
+}
+
+func (pcv *PathConv) Show() {
+	for i, v := range pcv.table {
+		fmt.Println(i, "=>", v)
+	}
+}
+
+func (pcv *PathConv) BuildMap(pre_hashed string, file_name string){
+	dirInfo := pcv.Query(pre_hashed)
+	prefix := ""
+	if dirInfo != nil {
+		prefix = dirInfo.DirStr
+	}
+	
+	files, err := ioutil.ReadDir(conf.Server.Root + prefix + "/" + file_name)
+	if err != nil {
+		panic(err)
+	}
+	
+	hashed := pcv.AddHash(pre_hashed, file_name)
+	for _, f := range files {
+		if f.IsDir() {
+			pcv.BuildMap(hashed, f.Name())
+
+		} else {
+			pcv.AddHash(hashed, f.Name())
+		}
+	}
+}
 /**
  * This function implments relative path (local filesystem) to record path (url path).
  *
@@ -104,16 +140,6 @@ func (pcv *PathConv) AddHash(pre_hashed string, file_name string) string{
 //	pcv.buildFromImpl(dir, recordPath, "")
 //	fmt.Println("Pathconv built")
 //}
-
-func (pcv *PathConv) Query(hashed string) *DirInfo {
-	return pcv.table[hashed]
-}
-
-func (pcv *PathConv) Show() {
-	for i, v := range pcv.table {
-		fmt.Println(i, "=>", v)
-	}
-}
 
 //func (pcv *PathConv) StartWatching(dir string, recordPath string) {
 //	watcher, err := fsnotify.NewWatcher()
