@@ -40,6 +40,7 @@ func main() {
 	//serve for music fils.
 	//router.Static(conf.Server.UrlPrefix+"/file/", conf.Server.Root)
 	router.GET(conf.Server.UrlPrefix+"/file", serveFileHandler)
+	router.GET(conf.Server.UrlPrefix+"/songName", getSongNameHandler)
 	
 	//serve for files list.
 	router.GET(conf.Server.UrlPrefix+"/dir", directoryHandler)
@@ -240,7 +241,7 @@ func directoryHandler(c *gin.Context) {
 		curDir = dirInfo.DirStr
 	}
 	targetDir += curDir
-	log.Println("targetDir = " + targetDir)
+	//log.Println("targetDir = " + targetDir)
 	files, err := ioutil.ReadDir(targetDir)
 	if err != nil {
 		panic(err)
@@ -287,7 +288,18 @@ func serveFileHandler(c *gin.Context) {
 	}
 	c.File(conf.Server.Root+file_name)
 }
-	
+
+func getSongNameHandler(c *gin.Context) {
+	query_file := c.Query("m")
+	real_file := pconv.Query(query_file)
+	file_name := ""
+	if(real_file != nil){
+		file_name = real_file.DirArray[len(real_file.DirArray)-1].Name
+	}
+	log.Println(file_name)
+	c.String(http.StatusOK, file_name)
+}
+
 func isAudioExt(val string) bool {
 	for i := range conf.Server.AudioExt {
 		if conf.Server.AudioExt[i] == val {
