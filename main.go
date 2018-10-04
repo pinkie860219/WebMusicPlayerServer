@@ -1,89 +1,80 @@
 package main
 
-import(
-	//"html/template"
-	"log"
-	"io/ioutil"
-	"net/http"
-	"github.com/gin-gonic/gin"
+import (
+	"github.com/BurntSushi/toml"
 	"github.com/gin-contrib/cors"
-	//"github.com/gorilla/websocket"
-	// "encoding/json"
-	//"strconv"
-	"os"
-	"path/filepath"
+	"github.com/gin-gonic/gin"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
 )
-var audioExt = map[string]bool{
-	".wav": true,".webm": true,".opus": true,".ogg": true,".mp3": true,".m4a": true,".flac": true,
-}
-var root = "./web/mnt"
-/////const for MONGODB.
-var Host = []string{
-	"127.0.0.1:27017",
-	// replica set addrs...
-}
-const (
-	Username   = "YOUR_USERNAME"
-	Password   = "YOUR_PASS"
-	Database   = "playerSongList"
-	Collection = "YOUR_COLLECTION"
-)
-/////
-func main(){
+
+var conf Config
+var pconv = NewPathConv()
+
+func main() {
+	tomlData, err := ioutil.ReadFile("./config.toml")
+	if err != nil {
+		panic("can't read config.toml")
+	}
+	if _, err := toml.Decode(string(tomlData), &conf); err != nil {
+		panic("config parse error")
+	}
+
+
+//	go pconv.StartWatching(conf.Server.Root, "/file/")
+	//build the map
+	pconv.BuildMap("", "")
+	
+	log.Println("start")
 	router := gin.Default()
-	//router.GET("/ws/MusicPlayer", func(c *gin.Context){wshandler(c.Writer, c.Request)})
-	//router.Use(cors.Default())
 	config := cors.DefaultConfig()
 	config.AllowAllOrigins = true
 	config.AllowMethods = []string{"GET", "POST", "DELETE"}
 	router.Use(cors.New(config))
-	
+
 	//serve for music fils.
-	router.Static("/MusicServer/file/", root)
-
-	//serve for files list.
-	router.GET("/MusicServer/dir", directoryHandler)
-
+	//router.Static(conf.Server.UrlPrefix+"/file/", conf.Server.Root)
+	router.GET(conf.Server.UrlPrefix+"/file", serveFileHandler)
+	router.GET(conf.Server.UrlPrefix+"/songName", getSongNameHandler)
 	
+	//serve for files list.
+	router.GET(conf.Server.UrlPrefix+"/dir", directoryHandler)
+
 	/////MONGOBD
-	router.GET("/MusicServer/songlist", showSongListHandler)
-	router.GET("/MusicServer/songlist/:listname", singleSongListHandler)
-	router.POST("/MusicServer/songlist", addToSongListHandler)
-	router.POST("/MusicServer/songquery", songQueryHandler)
-	router.DELETE("/MusicServer/songlist", deleteSongHandler)
+	router.GET(conf.Server.UrlPrefix+"/songlist", showSongListHandler)
+	router.GET(conf.Server.UrlPrefix+"/songlist/:listname", singleSongListHandler)
+	router.POST(conf.Server.UrlPrefix+"/songlist", addToSongListHandler)
+	router.POST(conf.Server.UrlPrefix+"/songquery", songQueryHandler)
+	router.DELETE(conf.Server.UrlPrefix+"/songlist", deleteSongHandler)
 	/////
 
-
-	router.Run(":8026")
-	log.Println("Serveing on 8026")
+	router.Run(":"+conf.Server.Port)
+	log.Println("Serveing on "+conf.Server.Port)
 }
-func deleteSongHandler(c *gin.Context){
+
+func deleteSongHandler(c *gin.Context) {
 	session, err := mgo.DialWithInfo(&mgo.DialInfo{
-		Addrs: Host,
-		// Username: Username,
-		// Password: Password,
-		// Database: Database,
-		// DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
-		// 	return tls.Dial("tcp", addr.String(), &tls.Config{})
-		// },
+		Addrs: conf.DB.Host,
 	})
 	if err != nil {
 		panic(err)
 	}
 	defer session.Close()
 
-
 	songList := c.PostForm("songlist")
 	songname := c.PostForm("name")
 	songurl := c.PostForm("url")
 	// Collection
-	collection := session.DB(Database).C(songList)
+	collection := session.DB(conf.DB.Name).C(songList)
 
 	deleteSong := Song{
-		Name:songname,
-		Url: songurl,
+		Name: songname,
+		Url:  songurl,
 	}
 
 	// delete
@@ -91,86 +82,26 @@ func deleteSongHandler(c *gin.Context){
 		panic(err)
 	}
 
-	songListNames, err := session.DB(Database).CollectionNames()
-	if err != nil{
-		panic(err)
-	}
-
-	//Make the list of json for output.
-	list := make([]SongListAll, 0)
-	
-	list = append(list, SongListAll{
-		SongListNames: songListNames,
-	})
-	
-	c.JSON(http.StatusOK, list)
-
-}
-func songQueryHandler(c *gin.Context){
-//	songurl := c.Query("url")
-//	log.Println("songurl="+songurl)
-	songurl := c.PostForm("url")
-//	log.Println("songurl2="+songurl2)
-	session, err := mgo.DialWithInfo(&mgo.DialInfo{
-		Addrs: Host,
-		// Username: Username,
-		// Password: Password,
-		// Database: Database,
-		// DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
-		// 	return tls.Dial("tcp", addr.String(), &tls.Config{})
-		// },
-	})
+	songListNames, err := session.DB(conf.DB.Name).CollectionNames()
 	if err != nil {
 		panic(err)
 	}
-	defer session.Close()
 
-
-//	querySong := SongUrl{
-//		Url: songurl,
-//	}
-//	//SongLists in DB.
-	songListNames, err := session.DB(Database).CollectionNames()
-	if err != nil{
-		panic(err)
-	}
-
-	songListOutput := []string{}
-	var songs []Song
-	for _, songListName := range songListNames {
-		err = session.DB(Database).C(songListName).Find(bson.M{"url": songurl}).All(&songs)
-		if err != nil{
-			panic(err)
-		}
-
-		if(len(songs)!=0){
-			songListOutput = append(songListOutput, songListName)
-			log.Println("findin: " + songListName)
-		} 
-		
-	}
-
-	
 	//Make the list of json for output.
 	list := make([]SongListAll, 0)
-	
+
 	list = append(list, SongListAll{
-		SongListNames: songListOutput,
+		SongListNames: songListNames,
 	})
-	
+
 	c.JSON(http.StatusOK, list)
 
 }
 
-func showSongListHandler(c *gin.Context){
+func songQueryHandler(c *gin.Context) {
+	songurl := c.PostForm("url")
 	session, err := mgo.DialWithInfo(&mgo.DialInfo{
-		Addrs: Host,
-		// Username: Username,
-		// Password: Password,
-		// Database: Database,
-		// DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
-		// 	return tls.Dial("tcp", addr.String(), &tls.Config{})
-		// },
+		Addrs: conf.DB.Host,
 	})
 	if err != nil {
 		panic(err)
@@ -178,31 +109,65 @@ func showSongListHandler(c *gin.Context){
 	defer session.Close()
 
 	//SongLists in DB.
-	songListNames, err := session.DB(Database).CollectionNames()
-	if err != nil{
+	songListNames, err := session.DB(conf.DB.Name).CollectionNames()
+	if err != nil {
+		panic(err)
+	}
+
+	songListOutput := []string{}
+	var songs []Song
+	for _, songListName := range songListNames {
+		err = session.DB(conf.DB.Name).C(songListName).Find(bson.M{"url": songurl}).All(&songs)
+		if err != nil {
+			panic(err)
+		}
+
+		if len(songs) != 0 {
+			songListOutput = append(songListOutput, songListName)
+			log.Println("findin: " + songListName)
+		}
+	}
+
+	//Make the list of json for output.
+	list := make([]SongListAll, 0)
+
+	list = append(list, SongListAll{
+		SongListNames: songListOutput,
+	})
+
+	c.JSON(http.StatusOK, list)
+
+}
+
+func showSongListHandler(c *gin.Context) {
+	session, err := mgo.DialWithInfo(&mgo.DialInfo{
+		Addrs: conf.DB.Host,
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+
+	//SongLists in DB.
+	songListNames, err := session.DB(conf.DB.Name).CollectionNames()
+	if err != nil {
 		panic(err)
 	}
 
 	//Make the list of json for output.
 	list := make([]SongListAll, 0)
-	
+
 	list = append(list, SongListAll{
 		SongListNames: songListNames,
 	})
-	
+
 	c.JSON(http.StatusOK, list)
 
-
 }
-func singleSongListHandler(c *gin.Context){
+
+func singleSongListHandler(c *gin.Context) {
 	session, err := mgo.DialWithInfo(&mgo.DialInfo{
-		Addrs: Host,
-		// Username: Username,
-		// Password: Password,
-		// Database: Database,
-		// DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
-		// 	return tls.Dial("tcp", addr.String(), &tls.Config{})
-		// },
+		Addrs: conf.DB.Host,
 	})
 	if err != nil {
 		panic(err)
@@ -211,8 +176,8 @@ func singleSongListHandler(c *gin.Context){
 
 	// Collection
 	listName := c.Param("listname")
-	
-	collection := session.DB(Database).C(listName)
+
+	collection := session.DB(conf.DB.Name).C(listName)
 
 	// Find All
 	var songs []Song
@@ -221,34 +186,27 @@ func singleSongListHandler(c *gin.Context){
 		panic(err)
 	}
 	c.JSON(http.StatusOK, songs)
-	
 
 }
-func addToSongListHandler(c *gin.Context){
+
+func addToSongListHandler(c *gin.Context) {
 	session, err := mgo.DialWithInfo(&mgo.DialInfo{
-		Addrs: Host,
-		// Username: Username,
-		// Password: Password,
-		// Database: Database,
-		// DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
-		// 	return tls.Dial("tcp", addr.String(), &tls.Config{})
-		// },
+		Addrs: conf.DB.Host,
 	})
 	if err != nil {
 		panic(err)
 	}
 	defer session.Close()
 
-
 	songList := c.PostForm("songlist")
 	songname := c.PostForm("name")
 	songurl := c.PostForm("url")
 	// Collection
-	collection := session.DB(Database).C(songList)
+	collection := session.DB(conf.DB.Name).C(songList)
 
 	insertSong := Song{
-		Name:songname,
-		Url: songurl,
+		Name: songname,
+		Url:  songurl,
 	}
 	log.Println(insertSong)
 	// Insert
@@ -256,53 +214,47 @@ func addToSongListHandler(c *gin.Context){
 		panic(err)
 	}
 
-//	// Collection
-//	collection := session.DB(Database).C("newnewbe")
-//
-//	insertSong := Song{
-//		Name:"haha"  ,
-//		Url: "hahaurl",
-//	}
-//
-//	// Insert
-//	if err := collection.Insert(insertSong); err != nil {
-//		panic(err)
-//	}
-//
 	//SongLists in DB.
-	songListNames, err := session.DB(Database).CollectionNames()
-	if err != nil{
+	songListNames, err := session.DB(conf.DB.Name).CollectionNames()
+	if err != nil {
 		panic(err)
 	}
 
 	//Make the list of json for output.
 	list := make([]SongListAll, 0)
-	
+
 	list = append(list, SongListAll{
 		SongListNames: songListNames,
 	})
-	
+
 	c.JSON(http.StatusOK, list)
 
 }
 
+func directoryHandler(c *gin.Context) {
+	query_dir := c.Query("dir")
+	dirInfo := pconv.Query(query_dir)//type: DirInfo
 
-func directoryHandler(c *gin.Context){
-	dir := c.Query("dir")
-	//read files in directory.
-	files, err := ioutil.ReadDir(root + dir)
-	if err != nil {
-
+	targetDir := conf.Server.Root
+	curDir := ""
+	if(dirInfo != nil){
+		curDir = dirInfo.DirStr
 	}
-	s_dir := make([]os.FileInfo,0)    //list of folders
-	s_file := make([]os.FileInfo,0)   //list of files
-	
-	for _, f := range files{
-		if(f.Name()[0] != []byte(".")[0]){
+	targetDir += curDir
+	//log.Println("targetDir = " + targetDir)
+	files, err := ioutil.ReadDir(targetDir)
+	if err != nil {
+		panic(err)
+	}
+	s_dir := make([]os.FileInfo, 0)  //list of folders
+	s_file := make([]os.FileInfo, 0) //list of files
+
+	for _, f := range files {
+		if f.Name()[0] != []byte(".")[0] {
 			ext := filepath.Ext(f.Name())
-			if(f.IsDir()){
+			if f.IsDir() {
 				s_dir = append(s_dir, f)
-			} else if audioExt[ext]{ //check if file is music file. 
+			} else if isAudioExt(ext) { //check if file is music file.
 				s_file = append(s_file, f)
 			}
 		}
@@ -315,115 +267,90 @@ func directoryHandler(c *gin.Context){
 		names = append(names, Item{
 			Name:  f.Name(),
 			IsDir: f.IsDir(),
+			HashedCode: pconv.AddHash(query_dir, f.Name()),
 		})
 	}
-	c.JSON(http.StatusOK, names)
-
-	/////WEBSOCKET VERSION
-	// for _, f := range s_dir{
-	// 	msg_out := Item{
-	// 		"item",
-	// 		f.Name(),
-	// 		strconv.FormatBool(f.IsDir()),
-	// 	}
-	// 	conn.WriteJSON(msg_out)
-	// }
-	/////
+	
+	dirRes := new(DirResponse)
+	if(dirInfo != nil){
+		dirRes.DirArray = dirInfo.DirArray
+	}
+	dirRes.DirFiles = names
+	c.JSON(http.StatusOK, dirRes)
 }
 
+func serveFileHandler(c *gin.Context) {
+	query_file := c.Query("m")
+	real_file := pconv.Query(query_file)
+	file_name := ""
+	if(real_file != nil){
+		file_name = real_file.DirStr
+	}
+	c.File(conf.Server.Root+file_name)
+}
 
-/////////////////WEBSOCKET VERSION//////////////////
-// var upgrader =websocket.Upgrader{
-// 	CheckOrigin :func(r *http.Request)bool{
-// 		return true
-// 	},
-// }
-// func wshandler(w http.ResponseWriter, r *http.Request){
-// 	conn, err := upgrader.Upgrade(w, r, nil)
-// 	//defer conn.Close()
-// 	if err != nil{
-// 		log.Println("Failed to set websocket upgrade: %+v", err)
-// 		return
-// 	}
-// 	var msg map[string]interface{}
-// 	for{
-// 		err = conn.ReadJSON(&msg)
-// 		if err != nil{
-// 			log.Println("Failed to read json", err)
-// 			return
-// 		}
-// 		log.Println(msg["Action"].(string))
-// 		switch msg["Action"].(string){
-// 		case "list":
-// 			log.Println("Got list")
-// 			msg_out := UpdateList{
-// 				"list",
-// 			}
-// 			log.Println(msg_out);
-// 			conn.WriteJSON(msg_out)
-// 			//start read file
-// 			files, err := ioutil.ReadDir(root+msg["Path"].(string))
-// 			log.Println(root+msg["Path"].(string));
-// 			if err != nil{
-// 				log.Fatal(err)
-// 			}
-// 			s_dir := make([]os.FileInfo,0)
-// 			s_file := make([]os.FileInfo,0)
-// 			for _,f:=range files{
-// 				if(f.Name()[0] != []byte(".")[0]){
-// 					ext := filepath.Ext(f.Name())
-// 					if(f.IsDir()){
-// 						s_dir=append(s_dir,f)
-// 					} else if audioExt[ext]{
-// 						s_file = append(s_file,f)
-// 					}
-// 				}
-// 			}
-// 			s_dir = append(s_dir, s_file...)
-// 			for _,f:=range s_dir{
-// 				msg_out := Item{
-// 					"item",
-// 					f.Name(),
-// 					strconv.FormatBool(f.IsDir()),
-// 				}
-// 				conn.WriteJSON(msg_out)
-// 			}
-// 			msg_out = UpdateList{
-// 				"end",
-// 			}
-// 			log.Println(msg_out);
-// 			conn.WriteJSON(msg_out)
-// 		}
-// 	}
-//
-// }
-// type UpdateList struct{
-// 	Action string
-// }
-////////////////////////////////////////////////
+func getSongNameHandler(c *gin.Context) {
+	query_file := c.Query("m")
+	real_file := pconv.Query(query_file)
+	file_name := ""
+	if(real_file != nil){
+		file_name = real_file.DirArray[len(real_file.DirArray)-1].Name
+	}
+	log.Println(file_name)
+	c.String(http.StatusOK, file_name)
+}
+
+func isAudioExt(val string) bool {
+	for i := range conf.Server.AudioExt {
+		if conf.Server.AudioExt[i] == val {
+			return true
+		}
+	}
+	return false
+}
+
+// global config type
+type Config struct {
+	Server serverConfig `toml:"server"`
+	DB     dbConfig     `toml:"database"`
+}
+
+type serverConfig struct {
+	Root      string   `toml:"root"`
+	AudioExt  []string `toml:"audioExt"`
+	UrlPrefix string   `toml:"urlPrefix"`
+	Port string        `toml:"port"`
+}
+
+type dbConfig struct {
+	Host []string `toml:"host"`
+	Name string   `toml:"dbName"`
+}
 
 //datatype of file or folder
-type Item struct{
-	Action string//joystick
-	Name string
-	IsDir bool
+type Item struct {
+	HashedCode string
+	Name   string
+	IsDir  bool
 }
-
-
+type DirResponse struct {
+	DirArray []*DirItem
+	DirFiles []Item
+}
 //datatype of song in db.
-type Song struct{
+type Song struct {
 	Name string
-	Url string
+	Url  string
 }
-type SongInDB struct{
-	ID bson.ObjectId
+type SongInDB struct {
+	ID   bson.ObjectId
 	Name string
-	Url string
+	Url  string
 }
-type SongUrl struct{
+type SongUrl struct {
 	Url string
 }
 
-type SongListAll struct{
+type SongListAll struct {
 	SongListNames []string
 }
