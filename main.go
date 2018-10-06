@@ -9,8 +9,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
+//	"os"
+//	"path/filepath"
 )
 
 var conf Config
@@ -28,7 +28,7 @@ func main() {
 
 //	go pconv.StartWatching(conf.Server.Root, "/file/")
 	//build the map
-	pconv.BuildMap("", "")
+	pconv.BuildMap("", "", true)
 	
 	log.Println("start")
 	router := gin.Default()
@@ -235,47 +235,14 @@ func directoryHandler(c *gin.Context) {
 	query_dir := c.Query("dir")
 	dirInfo := pconv.Query(query_dir)//type: DirInfo
 
-	targetDir := conf.Server.Root
-	curDir := ""
-	if(dirInfo != nil){
-		curDir = dirInfo.DirStr
-	}
-	targetDir += curDir
-	//log.Println("targetDir = " + targetDir)
-	files, err := ioutil.ReadDir(targetDir)
-	if err != nil {
-		panic(err)
-	}
-	s_dir := make([]os.FileInfo, 0)  //list of folders
-	s_file := make([]os.FileInfo, 0) //list of files
-
-	for _, f := range files {
-		if f.Name()[0] != []byte(".")[0] {
-			ext := filepath.Ext(f.Name())
-			if f.IsDir() {
-				s_dir = append(s_dir, f)
-			} else if isAudioExt(ext) { //check if file is music file.
-				s_file = append(s_file, f)
-			}
-		}
-	}
-	s_dir = append(s_dir, s_file...)
-
-	//Make the list of json for output.
-	names := make([]Item, 0)
-	for _, f := range s_dir {
-		names = append(names, Item{
-			Name:  f.Name(),
-			IsDir: f.IsDir(),
-			HashedCode: pconv.AddHash(query_dir, f.Name()),
-		})
+	if dirInfo == nil{
+		dirInfo = pconv.Root()
 	}
 	
 	dirRes := new(DirResponse)
-	if(dirInfo != nil){
-		dirRes.DirArray = dirInfo.DirArray
-	}
-	dirRes.DirFiles = names
+	dirRes.DirArray = dirInfo.DirArray
+	dirRes.DirFiles = dirInfo.ItemArray
+	
 	c.JSON(http.StatusOK, dirRes)
 }
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"github.com/fsnotify/fsnotify"
 	"io/ioutil"
+	"path/filepath"
+	"log"
 )
 type DirItem struct {
 	Name string
@@ -14,6 +16,7 @@ type DirItem struct {
 type DirInfo struct {
 	DirArray []*DirItem
 	DirStr string
+	ItemArray []Item
 }
 func NewDirInfo(dArray []*DirItem, dStr string) *DirInfo{
 	di := new(DirInfo)
@@ -26,6 +29,7 @@ type PathConv struct {
 	table           map[string] *DirInfo /* hashed (12bit) -> original path*/
 	isBuildingTable bool
 	watcher         *fsnotify.Watcher
+	rootID          string
 }
 
 func NewPathConv() *PathConv {
@@ -41,63 +45,112 @@ func PathConvHash(s string) string {
 	return fmt.Sprintf("%x", sum)[:11]
 }
 
-func (pcv *PathConv) AddHash(pre_hashed string, file_name string) string{
-	preDirInfo := pcv.Query(pre_hashed)
-	prefix := ""
-	if(preDirInfo != nil){
-		prefix = preDirInfo.DirStr
-	}
-	hashed := PathConvHash(prefix+"/"+file_name)
-	//check if hashed is exist
-	if pcv.table[hashed] != nil{
-		return hashed
-	}
-	
-	dirItem := new(DirItem)
-	dirItem.Name = file_name
-	dirItem.HashedCode = hashed
-	
-	var newArray []*DirItem
-	if(preDirInfo != nil){
-		newArray = append(newArray, preDirInfo.DirArray...)
-	}
-	newArray = append(newArray, dirItem)
-	dirInfo := NewDirInfo(newArray, prefix+"/"+file_name)
-	pcv.table[hashed] = dirInfo
-	return hashed
-}
-
+//  func (pcv *PathConv) AddHash(pre_hashed string, file_name string) string{
+//  	preDirInfo := pcv.Query(pre_hashed)
+//  	prefix := ""
+//  	if(preDirInfo != nil){
+//  		prefix = preDirInfo.DirStr
+//  	}
+//  	hashed := PathConvHash(prefix+"/"+file_name)
+//  	//check if hashed is exist
+//  	if pcv.table[hashed] != nil{
+//  		return hashed
+//  	}
+//  	
+//  	dirItem := new(DirItem)
+//  	dirItem.Name = file_name
+//  	dirItem.HashedCode = hashed
+//  	
+//  	var newArray []*DirItem
+//  	if(preDirInfo != nil){
+//  		newArray = append(newArray, preDirInfo.DirArray...)
+//  	}
+//  	newArray = append(newArray, dirItem)
+//  	dirInfo := NewDirInfo(newArray, prefix+"/"+file_name)
+//  	pcv.table[hashed] = dirInfo
+//  	return hashed
+//  }
+//  
 func (pcv *PathConv) Query(hashed string) *DirInfo {
 	return pcv.table[hashed]
 }
-
+func (pcv *PathConv) Root() *DirInfo {
+	return pcv.table[pcv.rootID]
+}
 func (pcv *PathConv) Show() {
 	for i, v := range pcv.table {
 		fmt.Println(i, "=>", v)
 	}
 }
 
-func (pcv *PathConv) BuildMap(pre_hashed string, file_name string){
-	dirInfo := pcv.Query(pre_hashed)
+func (pcv *PathConv) BuildMap(pre_hashed string, file_name string, isDir bool) string{
+	//  1. 根據 hashed 找到前一路徑
+	preDirInfo := pcv.Query(pre_hashed)
 	prefix := ""
-	if dirInfo != nil {
-		prefix = dirInfo.DirStr
+	if preDirInfo != nil {
+		prefix = preDirInfo.DirStr
+	}
+	//  2. 計算自身的hashed
+	convName := ""
+	if file_name != "" {
+		convName = "/"+file_name
+	}
+	curDir := prefix+convName
+	hashed := PathConvHash(curDir)
+	if curDir == ""{
+		pcv.rootID = hashed
+	}
+	//  6. 將自身紀錄到map中
+	dirItem := new(DirItem)
+	dirItem.Name = file_name
+	dirItem.HashedCode = hashed
+	
+	var breadArray []*DirItem
+	if(preDirInfo != nil){
+		breadArray = append(breadArray, preDirInfo.DirArray...)
+	}
+	if curDir != ""{
+		breadArray = append(breadArray, dirItem)
 	}
 	
-	files, err := ioutil.ReadDir(conf.Server.Root + prefix + "/" + file_name)
-	if err != nil {
-		panic(err)
-	}
+	newDirInfo := NewDirInfo(breadArray, curDir)
+	pcv.table[hashed] = newDirInfo
 	
-	hashed := pcv.AddHash(pre_hashed, file_name)
-	for _, f := range files {
-		if f.IsDir() {
-			pcv.BuildMap(hashed, f.Name())
-
-		} else {
-			pcv.AddHash(hashed, f.Name())
+	//  3. 前一路徑加上本身名稱， 讀取目前路徑中的檔案
+	folderArray := make([]Item, 0)
+	songArray := make([]Item, 0)
+	if isDir {
+		openDir := conf.Server.Root + curDir
+		//log.Println(fmt.Sprintf("Now opening:[%s]:'%s'",hashed,openDir))
+		files, err := ioutil.ReadDir(openDir)
+		if err != nil {
+			log.Println("---ERROR opening:'" + openDir +"'")
+			pcv.Show()
+			panic(err)
+		}
+		//  4. 把自身的hashed和子檔案傳給下一個遞迴
+		//  5. 紀錄子檔案和其hashed陣列
+		//hashed := pcv.AddHash(pre_hashed, file_name)
+		
+		for _, f := range files {
+			ext := filepath.Ext(f.Name())
+			if (f.Name()[0] != []byte(".")[0]) && (f.IsDir() || isAudioExt(ext)) {
+				item := Item{
+					Name: f.Name(),
+					IsDir: f.IsDir(),
+					HashedCode:pcv.BuildMap(hashed, f.Name(), f.IsDir()),
+				}
+				if f.IsDir() {
+					folderArray = append(folderArray,item)
+				} else {
+					songArray = append(songArray,item)
+				}
+			}
 		}
 	}
+	pcv.table[hashed].ItemArray = append(folderArray, songArray...)
+	//  7. 回傳 hashed
+	return hashed
 }
 /**
  * This function implments relative path (local filesystem) to record path (url path).
