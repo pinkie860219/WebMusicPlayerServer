@@ -7,16 +7,23 @@ import (
 	"io/ioutil"
 	"path/filepath"
 	"log"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 )
 type DirItem struct {
 	Name string
 	HashedCode string
 }
-
+func (diri DirItem) String() string {
+	return fmt.Sprintf("{Name: %s, HashedCode: %s}", diri.Name, diri.HashedCode)
+}
 type DirInfo struct {
 	DirArray []*DirItem
 	DirStr string
 	ItemArray []Item
+}
+func (diri DirInfo)String()string{
+	return fmt.Sprintf("DirArray: %s\nDirStr: %s\nItemArray: %s\n\n", diri.DirArray, diri.DirStr, diri.ItemArray)	
 }
 func NewDirInfo(dArray []*DirItem, dStr string) *DirInfo{
 	di := new(DirInfo)
@@ -29,7 +36,6 @@ type PathConv struct {
 	table           map[string] *DirInfo /* hashed (12bit) -> original path*/
 	isBuildingTable bool
 	watcher         *fsnotify.Watcher
-	rootID          string
 }
 
 func NewPathConv() *PathConv {
@@ -44,38 +50,21 @@ func PathConvHash(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return fmt.Sprintf("%x", sum)[:11]
 }
-
-//  func (pcv *PathConv) AddHash(pre_hashed string, file_name string) string{
-//  	preDirInfo := pcv.Query(pre_hashed)
-//  	prefix := ""
-//  	if(preDirInfo != nil){
-//  		prefix = preDirInfo.DirStr
-//  	}
-//  	hashed := PathConvHash(prefix+"/"+file_name)
-//  	//check if hashed is exist
-//  	if pcv.table[hashed] != nil{
-//  		return hashed
-//  	}
-//  	
-//  	dirItem := new(DirItem)
-//  	dirItem.Name = file_name
-//  	dirItem.HashedCode = hashed
-//  	
-//  	var newArray []*DirItem
-//  	if(preDirInfo != nil){
-//  		newArray = append(newArray, preDirInfo.DirArray...)
-//  	}
-//  	newArray = append(newArray, dirItem)
-//  	dirInfo := NewDirInfo(newArray, prefix+"/"+file_name)
-//  	pcv.table[hashed] = dirInfo
-//  	return hashed
-//  }
-//  
+  
 func (pcv *PathConv) Query(hashed string) *DirInfo {
-	return pcv.table[hashed]
+	dirInfo := pcv.table[hashed]
+	if dirInfo == nil{
+		dirInfo = pconv.Root()
+	}
+	return dirInfo
 }
 func (pcv *PathConv) Root() *DirInfo {
-	return pcv.table[pcv.rootID]
+	for _, v := range pcv.table {
+		if v.DirStr == ""{
+			return v
+		}
+	}
+	return nil
 }
 func (pcv *PathConv) Show() {
 	for i, v := range pcv.table {
@@ -97,9 +86,7 @@ func (pcv *PathConv) BuildMap(pre_hashed string, file_name string, isDir bool) s
 	}
 	curDir := prefix+convName
 	hashed := PathConvHash(curDir)
-	if curDir == ""{
-		pcv.rootID = hashed
-	}
+
 	//  6. 將自身紀錄到map中
 	dirItem := new(DirItem)
 	dirItem.Name = file_name
@@ -151,6 +138,41 @@ func (pcv *PathConv) BuildMap(pre_hashed string, file_name string, isDir bool) s
 	pcv.table[hashed].ItemArray = append(folderArray, songArray...)
 	//  7. 回傳 hashed
 	return hashed
+}
+
+func (pcv *PathConv) SaveMapToDB(){
+	session, err := mgo.DialWithInfo(&mgo.DialInfo{
+		Addrs: conf.DB.Host,
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+
+	// Collection
+	collection := session.DB(conf.DB.Name[1]).C("table")
+	// Insert
+	if err := collection.Insert(pcv.table); err != nil {
+		panic(err)
+	}
+
+	
+	
+}
+func (pcv *PathConv) ReadMapFromDB(){
+	session, err := mgo.DialWithInfo(&mgo.DialInfo{
+		Addrs: conf.DB.Host,
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+
+	// Collection
+	collection := session.DB(conf.DB.Name[1]).C("table")
+	// Find
+	collection.Find(bson.M{}).One(&pcv.table)
+	
 }
 /**
  * This function implments relative path (local filesystem) to record path (url path).

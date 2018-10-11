@@ -9,6 +9,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"strings"
+	"fmt"
 //	"os"
 //	"path/filepath"
 )
@@ -28,7 +30,10 @@ func main() {
 
 //	go pconv.StartWatching(conf.Server.Root, "/file/")
 	//build the map
-	pconv.BuildMap("", "", true)
+	// pconv.BuildMap("", "", true)
+	// pconv.SaveMapToDB()
+	pconv.ReadMapFromDB()
+	
 	
 	log.Println("start")
 	router := gin.Default()
@@ -70,7 +75,7 @@ func deleteSongHandler(c *gin.Context) {
 	songname := c.PostForm("name")
 	songurl := c.PostForm("url")
 	// Collection
-	collection := session.DB(conf.DB.Name).C(songList)
+	collection := session.DB(conf.DB.Name[0]).C(songList)
 
 	deleteSong := Song{
 		Name: songname,
@@ -82,20 +87,19 @@ func deleteSongHandler(c *gin.Context) {
 		panic(err)
 	}
 
-	songListNames, err := session.DB(conf.DB.Name).CollectionNames()
+	songListNames, err := session.DB(conf.DB.Name[0]).CollectionNames()
 	if err != nil {
 		panic(err)
 	}
 
 	//Make the list of json for output.
-	list := make([]SongListAll, 0)
-
-	list = append(list, SongListAll{
-		SongListNames: songListNames,
-	})
-
+	list := []string{}
+	for _, v := range songListNames{
+		if !strings.Contains(v, "system."){
+			list = append(list, v)
+		}
+	} 
 	c.JSON(http.StatusOK, list)
-
 }
 
 func songQueryHandler(c *gin.Context) {
@@ -109,7 +113,7 @@ func songQueryHandler(c *gin.Context) {
 	defer session.Close()
 
 	//SongLists in DB.
-	songListNames, err := session.DB(conf.DB.Name).CollectionNames()
+	songListNames, err := session.DB(conf.DB.Name[0]).CollectionNames()
 	if err != nil {
 		panic(err)
 	}
@@ -117,7 +121,7 @@ func songQueryHandler(c *gin.Context) {
 	songListOutput := []string{}
 	var songs []Song
 	for _, songListName := range songListNames {
-		err = session.DB(conf.DB.Name).C(songListName).Find(bson.M{"url": songurl}).All(&songs)
+		err = session.DB(conf.DB.Name[0]).C(songListName).Find(bson.M{"url": songurl}).All(&songs)
 		if err != nil {
 			panic(err)
 		}
@@ -129,12 +133,12 @@ func songQueryHandler(c *gin.Context) {
 	}
 
 	//Make the list of json for output.
-	list := make([]SongListAll, 0)
-
-	list = append(list, SongListAll{
-		SongListNames: songListOutput,
-	})
-
+	list := []string{}
+	for _, v := range songListOutput{
+		if !strings.Contains(v, "system."){
+			list = append(list, v)
+		}
+	} 
 	c.JSON(http.StatusOK, list)
 
 }
@@ -149,18 +153,18 @@ func showSongListHandler(c *gin.Context) {
 	defer session.Close()
 
 	//SongLists in DB.
-	songListNames, err := session.DB(conf.DB.Name).CollectionNames()
+	songListNames, err := session.DB(conf.DB.Name[0]).CollectionNames()
 	if err != nil {
 		panic(err)
 	}
 
 	//Make the list of json for output.
-	list := make([]SongListAll, 0)
-
-	list = append(list, SongListAll{
-		SongListNames: songListNames,
-	})
-
+	list := []string{}
+	for _, v := range songListNames{
+		if !strings.Contains(v, "system."){
+			list = append(list, v)
+		}
+	} 
 	c.JSON(http.StatusOK, list)
 
 }
@@ -177,7 +181,7 @@ func singleSongListHandler(c *gin.Context) {
 	// Collection
 	listName := c.Param("listname")
 
-	collection := session.DB(conf.DB.Name).C(listName)
+	collection := session.DB(conf.DB.Name[0]).C(listName)
 
 	// Find All
 	var songs []Song
@@ -202,7 +206,7 @@ func addToSongListHandler(c *gin.Context) {
 	songname := c.PostForm("name")
 	songurl := c.PostForm("url")
 	// Collection
-	collection := session.DB(conf.DB.Name).C(songList)
+	collection := session.DB(conf.DB.Name[0]).C(songList)
 
 	insertSong := Song{
 		Name: songname,
@@ -215,29 +219,24 @@ func addToSongListHandler(c *gin.Context) {
 	}
 
 	//SongLists in DB.
-	songListNames, err := session.DB(conf.DB.Name).CollectionNames()
+	songListNames, err := session.DB(conf.DB.Name[0]).CollectionNames()
 	if err != nil {
 		panic(err)
 	}
 
 	//Make the list of json for output.
-	list := make([]SongListAll, 0)
-
-	list = append(list, SongListAll{
-		SongListNames: songListNames,
-	})
-
+	list := []string{}
+	for _, v := range songListNames{
+		if !strings.Contains(v, "system."){
+			list = append(list, v)
+		}
+	} 
 	c.JSON(http.StatusOK, list)
-
 }
 
 func directoryHandler(c *gin.Context) {
 	query_dir := c.Query("dir")
 	dirInfo := pconv.Query(query_dir)//type: DirInfo
-
-	if dirInfo == nil{
-		dirInfo = pconv.Root()
-	}
 	
 	dirRes := new(DirResponse)
 	dirRes.DirArray = dirInfo.DirArray
@@ -291,7 +290,7 @@ type serverConfig struct {
 
 type dbConfig struct {
 	Host []string `toml:"host"`
-	Name string   `toml:"dbName"`
+	Name []string `toml:"dbName"`
 }
 
 //datatype of file or folder
@@ -299,6 +298,9 @@ type Item struct {
 	HashedCode string
 	Name   string
 	IsDir  bool
+}
+func (item Item) String() string {
+	return fmt.Sprintf("{Name: %s, HashedCode: %s, IsDir:%t}", item.Name, item.HashedCode, item.IsDir)
 }
 type DirResponse struct {
 	DirArray []*DirItem
@@ -309,15 +311,8 @@ type Song struct {
 	Name string
 	Url  string
 }
-type SongInDB struct {
-	ID   bson.ObjectId
-	Name string
-	Url  string
-}
+
 type SongUrl struct {
 	Url string
 }
 
-type SongListAll struct {
-	SongListNames []string
-}
