@@ -17,6 +17,7 @@ import (
 
 var conf Config
 var pconv = NewPathConv()
+var ltb = NewListTable()
 
 func main() {
 	tomlData, err := ioutil.ReadFile("./config.toml")
@@ -111,20 +112,8 @@ func showSongListHandler(c *gin.Context) {
 	}
 	defer session.Close()
 
-	//SongLists in DB.
-	songListNames, err := session.DB(conf.DB.Name[0]).CollectionNames()
-	if err != nil {
-		panic(err)
-	}
-
-	//Make the list of json for output.
-	list := []string{}
-	for _, v := range songListNames{
-		if !strings.Contains(v, "system."){
-			list = append(list, v)
-		}
-	} 
-	c.JSON(http.StatusOK, list)
+	
+	c.JSON(http.StatusOK, ltb.Items())
 
 }
 
@@ -138,13 +127,14 @@ func singleSongListHandler(c *gin.Context) {
 	defer session.Close()
 
 	// Collection
-	listName := c.Param("listname")
-
+	listHashed := c.Param("listname")
+	listName := ltb.Query(listHashed)
+	log.Println(listName)
 	collection := session.DB(conf.DB.Name[0]).C(listName)
 
 	// Find All
-	response := []Item{}
-	err = collection.Find(nil).All(response)
+	var response []Item
+	err = collection.Find(nil).All(&response)
 	if err != nil {
 		panic(err)
 	}
@@ -168,6 +158,7 @@ func addToSongListHandler(c *gin.Context) {
 	// Collection
 	collection := session.DB(conf.DB.Name[0]).C(songList)
 
+	
 	// Insert
 	if pconv.Query(hashed) != nil{
 		if err := collection.Insert(
@@ -183,20 +174,7 @@ func addToSongListHandler(c *gin.Context) {
 	// 	c.String(http.StatusNotFound, "Unknown Song")
 	// }
 	
-	//SongLists in DB.
-	songListNames, err := session.DB(conf.DB.Name[0]).CollectionNames()
-	if err != nil {
-		panic(err)
-	}
-
-	//Make the list of json for output.
-	list := []string{}
-	for _, v := range songListNames{
-		if !strings.Contains(v, "system."){
-			list = append(list, v)
-		}
-	} 
-	c.JSON(http.StatusOK, list)
+	c.JSON(http.StatusOK, ltb.Items())
 }
 
 func deleteSongHandler(c *gin.Context) {
@@ -222,19 +200,7 @@ func deleteSongHandler(c *gin.Context) {
 		}
 	}
 	
-	songListNames, err := session.DB(conf.DB.Name[0]).CollectionNames()
-	if err != nil {
-		panic(err)
-	}
-
-	//Make the list of json for output.
-	list := []string{}
-	for _, v := range songListNames{
-		if !strings.Contains(v, "system."){
-			list = append(list, v)
-		}
-	} 
-	c.JSON(http.StatusOK, list)
+	c.JSON(http.StatusOK, ltb.Items())
 }
 
 
