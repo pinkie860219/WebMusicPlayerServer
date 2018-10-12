@@ -58,6 +58,13 @@ func (pcv *PathConv) Query(hashed string) *DirInfo {
 	}
 	return dirInfo
 }
+func (pcv *PathConv) QueryItem(hashed string) DirItem {
+	dirInfo := pcv.Query(hashed)
+	return DirItem{
+		Name:dirInfo.DirArray[len(dirInfo.DirArray)-1].Name,
+		HashedCode:dirInfo.DirArray[len(dirInfo.DirArray)-1].HashedCode,
+	}
+}
 func (pcv *PathConv) Root() *DirInfo {
 	for _, v := range pcv.table {
 		if v.DirStr == ""{
