@@ -57,6 +57,7 @@ func main() {
 	router.POST(conf.Server.UrlPrefix+"/songlist", addToSongListHandler)
 	router.GET(conf.Server.UrlPrefix+"/songquery", songQueryHandler)
 	router.DELETE(conf.Server.UrlPrefix+"/songlist", deleteSongHandler)
+	router.DELETE(conf.Server.UrlPrefix+"/delsonglist", deleteSongListHandler)
 	/////
 
 	router.Run(":"+conf.Server.Port)
@@ -129,14 +130,16 @@ func singleSongListHandler(c *gin.Context) {
 	// Collection
 	listHashed := c.Param("listname")
 	listName := ltb.Query(listHashed)
-	log.Println(listName)
+	//log.Println(listName)
 	collection := session.DB(conf.DB.Name[0]).C(listName)
 
 	// Find All
 	var response []Item
 	err = collection.Find(nil).All(&response)
 	if err != nil {
-		panic(err)
+		log.Println("songlistNotFound")
+		c.JSON(http.StatusNotFound, []Item{})
+		//panic(err)
 	}
 	c.JSON(http.StatusOK, response)
 
@@ -169,12 +172,12 @@ func addToSongListHandler(c *gin.Context) {
 			});err != nil {
 				panic(err)
 			}
+		c.JSON(http.StatusOK, ltb.Items())
+	} else {
+		c.JSON(http.StatusNotFound, ltb.Items())
 	}
-	// else {
-	// 	c.String(http.StatusNotFound, "Unknown Song")
-	// }
 	
-	c.JSON(http.StatusOK, ltb.Items())
+	
 }
 
 func deleteSongHandler(c *gin.Context) {
@@ -203,6 +206,30 @@ func deleteSongHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, ltb.Items())
 }
 
+func deleteSongListHandler(c* gin.Context){
+	session, err := mgo.DialWithInfo(&mgo.DialInfo{
+		Addrs: conf.DB.Host,
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+
+	hashed := c.PostForm("hashed")
+	listName := ltb.Query(hashed)	
+
+	log.Println(hashed)
+	log.Println(listName)
+	// Collection
+	collection := session.DB(conf.DB.Name[0]).C(listName)
+
+	err  = collection.DropCollection()
+	if err != nil {
+		panic(err)
+	}
+	
+	c.JSON(http.StatusOK, ltb.Items())
+}
 
 func directoryHandler(c *gin.Context) {
 	query_dir := c.Query("dir")

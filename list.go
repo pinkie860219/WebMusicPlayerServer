@@ -13,6 +13,9 @@ func NewListTable() *ListTable{
 	lt.table = make(map[string] string)
 	return lt
 }
+func (lt *ListTable)Clear(){
+	lt.table = make(map[string] string)
+}
 func (lt *ListTable)Add(listname string)string{
 	hashed := PathConvHash(listname)
 	lt.table[hashed] = listname
@@ -37,9 +40,10 @@ func (lt *ListTable)Update(){
 	if err != nil {
 		panic(err)
 	}
+	lt.Clear()
 	for _, v := range songListNames{
 		if !strings.Contains(v, "system."){
-			ltb.Add(v)
+			lt.Add(v)
 		}
 	} 	
 }
