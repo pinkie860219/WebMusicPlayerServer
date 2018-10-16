@@ -17,6 +17,7 @@ import (
 
 var conf Config
 var pconv = NewPathConv()
+var ltb = NewListTable()
 
 func main() {
 	tomlData, err := ioutil.ReadFile("./config.toml")
@@ -30,9 +31,9 @@ func main() {
 
 //	go pconv.StartWatching(conf.Server.Root, "/file/")
 	//build the map
-	// pconv.BuildMap("", "", true)
-	// pconv.SaveMapToDB()
-	pconv.ReadMapFromDB()
+	pconv.BuildMap("", "", true)
+	pconv.SaveMapToDB()
+	//pconv.ReadMapFromDB()
 	
 	
 	log.Println("start")
@@ -54,56 +55,19 @@ func main() {
 	router.GET(conf.Server.UrlPrefix+"/songlist", showSongListHandler)
 	router.GET(conf.Server.UrlPrefix+"/songlist/:listname", singleSongListHandler)
 	router.POST(conf.Server.UrlPrefix+"/songlist", addToSongListHandler)
-	router.POST(conf.Server.UrlPrefix+"/songquery", songQueryHandler)
+	router.GET(conf.Server.UrlPrefix+"/songquery", songQueryHandler)
 	router.DELETE(conf.Server.UrlPrefix+"/songlist", deleteSongHandler)
+	router.DELETE(conf.Server.UrlPrefix+"/delsonglist", deleteSongListHandler)
 	/////
 
 	router.Run(":"+conf.Server.Port)
 	log.Println("Serveing on "+conf.Server.Port)
 }
 
-func deleteSongHandler(c *gin.Context) {
-	session, err := mgo.DialWithInfo(&mgo.DialInfo{
-		Addrs: conf.DB.Host,
-	})
-	if err != nil {
-		panic(err)
-	}
-	defer session.Close()
-
-	songList := c.PostForm("songlist")
-	songname := c.PostForm("name")
-	songurl := c.PostForm("url")
-	// Collection
-	collection := session.DB(conf.DB.Name[0]).C(songList)
-
-	deleteSong := Song{
-		Name: songname,
-		Url:  songurl,
-	}
-
-	// delete
-	if _, err := collection.RemoveAll(deleteSong); err != nil {
-		panic(err)
-	}
-
-	songListNames, err := session.DB(conf.DB.Name[0]).CollectionNames()
-	if err != nil {
-		panic(err)
-	}
-
-	//Make the list of json for output.
-	list := []string{}
-	for _, v := range songListNames{
-		if !strings.Contains(v, "system."){
-			list = append(list, v)
-		}
-	} 
-	c.JSON(http.StatusOK, list)
-}
 
 func songQueryHandler(c *gin.Context) {
-	songurl := c.PostForm("url")
+	hashed := c.Query("h")
+	log.Println(hashed)
 	session, err := mgo.DialWithInfo(&mgo.DialInfo{
 		Addrs: conf.DB.Host,
 	})
@@ -119,26 +83,23 @@ func songQueryHandler(c *gin.Context) {
 	}
 
 	songListOutput := []string{}
-	var songs []Song
+	var songs []Item
 	for _, songListName := range songListNames {
-		err = session.DB(conf.DB.Name[0]).C(songListName).Find(bson.M{"url": songurl}).All(&songs)
+		err = session.DB(conf.DB.Name[0]).C(songListName).Find(bson.M{"HashedCode":hashed}).All(&songs)
 		if err != nil {
 			panic(err)
 		}
-
 		if len(songs) != 0 {
 			songListOutput = append(songListOutput, songListName)
-			log.Println("findin: " + songListName)
 		}
 	}
-
 	//Make the list of json for output.
 	list := []string{}
 	for _, v := range songListOutput{
 		if !strings.Contains(v, "system."){
 			list = append(list, v)
 		}
-	} 
+	}
 	c.JSON(http.StatusOK, list)
 
 }
@@ -152,20 +113,8 @@ func showSongListHandler(c *gin.Context) {
 	}
 	defer session.Close()
 
-	//SongLists in DB.
-	songListNames, err := session.DB(conf.DB.Name[0]).CollectionNames()
-	if err != nil {
-		panic(err)
-	}
-
-	//Make the list of json for output.
-	list := []string{}
-	for _, v := range songListNames{
-		if !strings.Contains(v, "system."){
-			list = append(list, v)
-		}
-	} 
-	c.JSON(http.StatusOK, list)
+	
+	c.JSON(http.StatusOK, ltb.Items())
 
 }
 
@@ -179,17 +128,20 @@ func singleSongListHandler(c *gin.Context) {
 	defer session.Close()
 
 	// Collection
-	listName := c.Param("listname")
-
+	listHashed := c.Param("listname")
+	listName := ltb.Query(listHashed)
+	//log.Println(listName)
 	collection := session.DB(conf.DB.Name[0]).C(listName)
 
 	// Find All
-	var songs []Song
-	err = collection.Find(nil).All(&songs)
+	var response []Item
+	err = collection.Find(nil).All(&response)
 	if err != nil {
-		panic(err)
+		log.Println("songlistNotFound")
+		c.JSON(http.StatusNotFound, []Item{})
+		//panic(err)
 	}
-	c.JSON(http.StatusOK, songs)
+	c.JSON(http.StatusOK, response)
 
 }
 
@@ -203,35 +155,80 @@ func addToSongListHandler(c *gin.Context) {
 	defer session.Close()
 
 	songList := c.PostForm("songlist")
-	songname := c.PostForm("name")
-	songurl := c.PostForm("url")
+	hashed := c.PostForm("hashed")
+
+	// log.Println(fmt.Sprintf("songList:%s, hashed:%s", songList, hashed))
 	// Collection
 	collection := session.DB(conf.DB.Name[0]).C(songList)
 
-	insertSong := Song{
-		Name: songname,
-		Url:  songurl,
-	}
-	log.Println(insertSong)
+	
 	// Insert
-	if err := collection.Insert(insertSong); err != nil {
-		panic(err)
+	if pconv.Query(hashed) != nil{
+		if err := collection.Insert(
+			Item{
+				HashedCode:hashed,
+				Name:pconv.QueryItem(hashed).Name,
+				IsDir:false,
+			});err != nil {
+				panic(err)
+			}
+		c.JSON(http.StatusOK, ltb.Items())
+	} else {
+		c.JSON(http.StatusNotFound, ltb.Items())
 	}
+	
+	
+}
 
-	//SongLists in DB.
-	songListNames, err := session.DB(conf.DB.Name[0]).CollectionNames()
+func deleteSongHandler(c *gin.Context) {
+	session, err := mgo.DialWithInfo(&mgo.DialInfo{
+		Addrs: conf.DB.Host,
+	})
 	if err != nil {
 		panic(err)
 	}
+	defer session.Close()
 
-	//Make the list of json for output.
-	list := []string{}
-	for _, v := range songListNames{
-		if !strings.Contains(v, "system."){
-			list = append(list, v)
+	songList := c.PostForm("songlist")
+	hashed := c.PostForm("hashed")
+
+	// Collection
+	collection := session.DB(conf.DB.Name[0]).C(songList)
+
+	// delete
+	if pconv.Query(hashed) != nil{
+		if _, err := collection.RemoveAll(bson.M{"HashedCode":hashed});
+		err != nil {
+			panic(err)
 		}
-	} 
-	c.JSON(http.StatusOK, list)
+	}
+	
+	c.JSON(http.StatusOK, ltb.Items())
+}
+
+func deleteSongListHandler(c* gin.Context){
+	session, err := mgo.DialWithInfo(&mgo.DialInfo{
+		Addrs: conf.DB.Host,
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+
+	hashed := c.PostForm("hashed")
+	listName := ltb.Query(hashed)	
+
+	log.Println(hashed)
+	log.Println(listName)
+	// Collection
+	collection := session.DB(conf.DB.Name[0]).C(listName)
+
+	err  = collection.DropCollection()
+	if err != nil {
+		panic(err)
+	}
+	
+	c.JSON(http.StatusOK, ltb.Items())
 }
 
 func directoryHandler(c *gin.Context) {
@@ -257,12 +254,9 @@ func serveFileHandler(c *gin.Context) {
 
 func getSongNameHandler(c *gin.Context) {
 	query_file := c.Query("m")
-	real_file := pconv.Query(query_file)
-	file_name := ""
-	if(real_file != nil){
-		file_name = real_file.DirArray[len(real_file.DirArray)-1].Name
-	}
-	log.Println(file_name)
+	file_item := pconv.QueryItem(query_file)
+	file_name := file_item.Name
+	
 	c.String(http.StatusOK, file_name)
 }
 
@@ -295,9 +289,10 @@ type dbConfig struct {
 
 //datatype of file or folder
 type Item struct {
-	HashedCode string
-	Name   string
-	IsDir  bool
+	ID bson.ObjectId  `bson:"_id,omitempty"`
+	HashedCode string `bson:"HashedCode"`
+	Name   string     `bson:"Name"`
+	IsDir  bool       `bson:"IsDir"`
 }
 func (item Item) String() string {
 	return fmt.Sprintf("{Name: %s, HashedCode: %s, IsDir:%t}", item.Name, item.HashedCode, item.IsDir)
@@ -306,13 +301,5 @@ type DirResponse struct {
 	DirArray []*DirItem
 	DirFiles []Item
 }
-//datatype of song in db.
-type Song struct {
-	Name string
-	Url  string
-}
 
-type SongUrl struct {
-	Url string
-}
 
