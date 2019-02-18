@@ -1,4 +1,4 @@
-web/mnt/*
+mnt/*
 nohup.out
 config.toml
 WebMusicPlayerServer
